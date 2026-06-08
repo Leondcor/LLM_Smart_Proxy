@@ -1,0 +1,198 @@
+# ============================================================
+# 脱敏规则定义 — LLM Smart Proxy v8
+# 适用场景：投标文件、商务文档、合同等
+# ============================================================
+
+# ── 全局设置 ──
+settings:
+  # 是否记录脱敏映射到日志
+  log_mapping: true
+  # 映射日志路径（相对于本文件）
+  mapping_log: "../logs/sanitizer_mapping.log"
+  # 替换策略：placeholder（占位符）| mask（星号遮掩）| remove（直接删除）
+  default_strategy: "placeholder"
+  # 是否保留数字格式（金额保留位数、电话保留长度）
+  preserve_number_format: true
+
+# ── 实体类型定义（按优先级排序，高优先级先匹配）──
+entities:
+
+  # ── 极高风险 ──
+  - id: PERSON_NAME
+    name: "人名"
+    priority: 100
+    strategy: "placeholder"
+    placeholder: "[人员]"
+    rules:
+      # 身份证号（18位）- 最精确，优先匹配
+      - pattern: '[1-9]\d{5}(19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]'
+        description: "18位身份证号"
+        case_sensitive: false
+      # 手机号
+      - pattern: '1[3-9]\d{9}'
+        description: "中国大陆手机号"
+        case_sensitive: false
+      # 座机号
+      - pattern: '(0\d{2,3}[-\s]?)?\d{7,8}([-\s]?\d{1,6})?'
+        description: "座机号（含区号）"
+        case_sensitive: false
+        # 避免误匹配：仅当匹配长度 >= 10 字符
+        min_length: 10
+      # 邮箱
+      - pattern: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+        description: "电子邮箱"
+        case_sensitive: false
+        placeholder: "[邮箱]"
+
+  - id: UNIFIED_SOCIAL_CREDIT_CODE
+    name: "统一社会信用代码"
+    priority: 99
+    strategy: "placeholder"
+    placeholder: "[信用代码]"
+    rules:
+      - pattern: '[0-9A-HJ-NPQRTUWXY]{2}\d{6}[0-9A-HJ-NPQRTUWXY]{10}'
+        description: "18位统一社会信用代码"
+        case_sensitive: false
+
+  - id: BANK_ACCOUNT
+    name: "银行账号"
+    priority: 98
+    strategy: "mask"
+    mask_char: "*"
+    keep_last: 4
+    rules:
+      - pattern: '\b\d{16,19}\b'
+        description: "16-19位银行账号"
+        case_sensitive: false
+        # 排除：不是身份证（前6不是地区码格式）、不是金额（无小数点）
+        exclude_pattern: '[1-9]\d{5}(19|20)|[\d,.]+[元圆]'
+
+  # ── 高风险 ──
+  - id: COMPANY_NAME
+    name: "公司/机构名称"
+    priority: 90
+    strategy: "placeholder"
+    placeholder: "[公司{index}]"
+    counter: true  # 递增编号：公司1、公司2...
+    rules:
+      # 中文公司全称
+      - pattern: '(?:[\u4e00-\u9fff]{2,8}(?:市|省|自治区|特别行政区))?(?:[\u4e00-\u9fff]{2,20})?(?:有限|股份|集团|控股|投资|建设|工程|科技|咨询|管理|实业|发展|贸易|信息|数据|网络|软件|服务|制造|能源|化工|建材|房地产|物业|物流|运输|医药|生物|环保|农业|食品|文化|传媒|教育|旅游|金融|保险|证券|基金|信托|融资)(?:公司|企业|中心|事务所|院|局|所|行|社|会|部|处)'
+        description: "中文公司全称（含行业后缀）"
+        case_sensitive: false
+      # 英文公司名
+      - pattern: '\b[A-Z][a-zA-Z0-9\s&.,()-]{3,40}\s+(?:Inc\.?|Corp\.?|LLC|Ltd\.?|Limited|Co\.?|Company|Group|Holdings|Technologies|Solutions|Enterprises|Industries)\b'
+        description: "英文公司名"
+        case_sensitive: false
+      # 简称（括号内）
+      - pattern: '[\u4e00-\u9fff]{2,10}(?:集团|公司|企业|中心|院|局)'
+        description: "中文公司简称"
+        case_sensitive: false
+
+  - id: BID_AMOUNT
+    name: "投标金额/报价"
+    priority: 89
+    strategy: "placeholder"
+    placeholder: "[金额]"
+    rules:
+      # 带单位的大写金额
+      - pattern: '(?:人民币|美元|欧元|日元|港币|投标报价|投标总价|预算金额|中标金额|合同金额|报价|总价|金额)[：:\s]*[\d,]+\.?\d*\s*[万万千百十]?\s*(?:元|美元|欧元|日元|港币|人民币)'
+        description: "带上下文的金额"
+        case_sensitive: false
+      # 纯数字金额（万元/亿元）
+      - pattern: '\b\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\s*(?:万元|亿元|元)\b'
+        description: "货币金额数字"
+        case_sensitive: false
+      # 大写中文金额
+      - pattern: '[壹贰叁肆伍陆柒捌玖拾佰仟万亿零圆角分整]{4,}'
+        description: "中文大写金额"
+        case_sensitive: false
+
+  - id: PROJECT_CODE
+    name: "项目/招标编号"
+    priority: 88
+    strategy: "placeholder"
+    placeholder: "[项目编号]"
+    rules:
+      # 招标编号格式
+      - pattern: '(?:招标|项目|采购|备案|合同|计划)[\s\-_]*[编代]?号[\s:：]*[A-Za-z0-9\-_/（）()]{4,30}'
+        description: "招标/项目编号（带前缀）"
+        case_sensitive: false
+      # 纯编码格式：字母-数字-数字 或 字母+年份+数字
+      - pattern: '\b[A-Z]{2,6}[-\s_]?\d{2,4}[-\s_]?\d{2,8}\b'
+        description: "字母+年份+序号格式"
+        case_sensitive: false
+      - pattern: '\b(?:ZB|GK|GXTC|GC|SG|JL|FW|YQ|CQ|ZZ)-\d{2,4}[-\s_]?\d{2,8}\b'
+        description: "常见招标编号前缀"
+        case_sensitive: false
+
+  # ── 中风险 ──
+  - id: ADDRESS
+    name: "地址"
+    priority: 80
+    strategy: "placeholder"
+    placeholder: "[地址]"
+    rules:
+      - pattern: '(?:[\u4e00-\u9fff]{2,6}(?:省|自治区|特别行政区))(?:[\u4e00-\u9fff]{2,10}(?:市|自治州|地区|盟))?(?:[\u4e00-\u9fff]{2,10}(?:区|县|市|旗))?(?:[\u4e00-\u9fff]{2,20}(?:街道|镇|乡|路|街|道|巷|号|弄|园|村|庄|社区|小区|大厦|大楼|广场|中心|公寓))?(?:\d+[号楼栋单元层室号]?){0,5}'
+        description: "中文地址"
+        case_sensitive: false
+
+  - id: TECHNICAL_SPEC
+    name: "技术参数/规格"
+    priority: 70
+    strategy: "mask"
+    mask_char: "#"
+    keep_last: 0  # 全部遮掩
+    enabled: false  # 默认关闭，按需开启
+    rules:
+      - pattern: '(?:型号|规格|参数|功率|电压|电流|转速|排量|口径|耐压|流量)[：:\s]*[A-Za-z0-9\-_/（）()\u4e00-\u9fff]{2,30}'
+        description: "技术参数键值对"
+        case_sensitive: false
+
+# ── 白名单（不脱敏的术语/模式）──
+whitelist:
+  # 行业通用术语（不加mask）
+  terms:
+    - "公开招标"
+    - "邀请招标"
+    - "竞争性谈判"
+    - "询价采购"
+    - "单一来源"
+    - "资格预审"
+    - "评标委员会"
+    - "投标保证金"
+    - "履约保证金"
+    - "工程量清单"
+    - "综合评分法"
+    - "经评审的最低投标价法"
+    - "施工组织设计"
+    - "竣工验收"
+    - "缺陷责任期"
+    - "质量保证金"
+    - "不可抗力"
+    - "争议解决"
+    - "仲裁"
+    - "管辖法院"
+    - "合同价款"
+    - "预付款"
+    - "进度款"
+    - "结算款"
+    - "质保期"
+    - "保修期"
+    - "安全文明施工"
+    - "环境保护"
+    - "项目经理"
+    - "技术负责人"
+    - "安全管理"
+    - "质量管理"
+    - "进度管理"
+    - "成本控制"
+    - "风险控制"
+
+# ── 自定义词表（用户可扩展）──
+custom_keywords:
+  # 已知公司名（精确匹配，避免公司名拆分后各部分被白名单放过）
+  companies: []
+  # 已知项目名
+  projects: []
+  # 已知人名
+  persons: []

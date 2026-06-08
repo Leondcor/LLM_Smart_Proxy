@@ -1,0 +1,37 @@
+{
+  "models": [
+    {
+      "id": "gpt-5.5",
+      "name": "Sub2API GPT-5.5",
+      "vendor": "Custom",
+      "url": "http://localhost:4001/v1",
+      "apiKey": "Pwd12345westwell",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 4096,
+      "supportsToolCall": false,
+      "supportsImages": false
+    },
+    {
+      "id": "gpt-5.4",
+      "name": "Sub2API GPT-5.4",
+      "vendor": "Custom",
+      "url": "http://localhost:4001/v1",
+      "apiKey": "Pwd12345westwell",
+      "maxInputTokens": 32000,
+      "maxOutputTokens": 4096,
+      "supportsToolCall": false,
+      "supportsImages": false
+    },
+    {
+      "id": "gpt-5.4-mini",
+      "name": "Sub2API GPT-5.4 Mini",
+      "vendor": "Custom",
+      "url": "http://localhost:4001/v1",
+      "apiKey": "Pwd12345westwell",
+      "maxInputTokens": 16000,
+      "maxOutputTokens": 4096,
+      "supportsToolCall": false,
+      "supportsImages": false
+    }
+  ]
+}

@@ -1,0 +1,212 @@
+# ============================================================
+# LLM Smart Proxy — 配置文件
+# ============================================================
+
+# ── 上游 API ──
+upstream:
+  host: "ai.qomolo.com"
+  port: 8080
+  # API Key 优先取环境变量 PROXY_API_KEY，否则用此处的值
+  api_key: "Pwd12345westwell"
+  timeout_sec: 180
+  # 上游重试：应对 DNS/连接/TCP 瞬时故障
+  retry:
+    max_retries: 3              # 最大重试次数
+    backoff_base_sec: 1         # 退避基数（秒）— 实际等待 = base * 2^attempt
+    backoff_max_sec: 10         # 最大退避时间（秒）
+    # 哪些异常类型触发重试
+    on_errors:
+      - "Name or service not known"   # DNS 临时不可用
+      - "Connection refused"          # 上游未启动
+      - "Connection reset"            # TCP reset
+      - "timed out"                   # 超时
+      - "Temporary failure"           # DNS 临时故障
+
+# ── 代理监听 ──
+proxy:
+  port: 4002
+  bind: "0.0.0.0"
+  heartbeat_interval_sec: 3
+
+# ── 请求体清理 ──
+body_strip:
+  # 从请求体中删除的非标准字段
+  keys: ["reasoning_effort", "stream_options", "stream"]
+  # 从消息中删除的非标准字段
+  message_keys: ["skipRun", "skip_run"]
+
+# ── 请求头清理 ──
+header_strip:
+  prefixes:
+    - "x-stainless-"
+    - "x-agent-"
+    - "x-ide-"
+    - "x-conversation-"
+    - "x-trace-"
+    - "x-b3-"
+    - "x-request-id"
+    - "x-domain"
+    - "x-product"
+    - "x-user-id"
+    - "x-api-key"
+    - "acp-connection-id"
+    - "x-codebuddy-request"
+    - "x-requested-with"
+    - "referrer-policy"
+    - "b3"
+  # 保留的请求头
+  keep: ["authorization", "content-type", "accept", "user-agent", "content-length", "host"]
+
+# ── 消息截断 ──
+truncation:
+  max_system_chars: 5000       # system prompt 最大字符数
+  max_message_chars: 8000      # 单条消息最大字符数
+  max_messages: 8              # 最多保留 N 条消息（含 system）
+  max_total_bytes: 28000       # 整个请求体上限
+  hard_truncate_tail_chars: 200  # 硬截断时最后一条消息至少保留 N 字符
+
+# ── 客户端识别 ──
+client_detect:
+  enabled: true
+  # User-Agent 匹配规则（大小写不敏感，按顺序匹配，命中即停）
+  patterns:
+    - agent: "codex"
+      match: ["codex", "opencode"]
+    - agent: "hermes"
+      match: ["hermes"]
+    - agent: "openclaw"
+      match: ["openclaw"]
+    - agent: "cline"
+      match: ["cline"]
+    - agent: "workbuddy"
+      match: ["codebuddy", "workbuddy"]
+    - agent: "cursor"
+      match: ["cursor"]
+    - agent: "continue"
+      match: ["continue"]
+    - agent: "curl"
+      match: ["curl", "httpie"]
+    - agent: "unknown"
+      match: []  # fallback
+
+# ── 智能路由 ──
+routing:
+  enabled: true                # 是否启用路由判断
+  prompt: |
+    判断以下用户消息是否依赖对话历史才能正确回答。
+    只回答一个词：DEPENDS 或 INDEPENDENT。
+
+    DEPENDS（依赖历史）：
+    - 追问/延续/修改刚才的东西/引用之前内容
+    - "那个方案再调整下""基于上面继续""刚才说的那个"
+    - 多轮推理或编码需连续上下文
+
+    INDEPENDENT（独立问题）：
+    - 新话题/独立查询/问候/纯知识问答
+    - "你是哪个模型""今天天气如何""Python怎么读文件"
+
+    用户消息：{query}
+
+    回答：
+
+# ── 两步编排器 ──
+orchestrator:
+  compact_threshold_bytes: 6000  # 超过此字节数触发两步法
+  summary_max_chars: 300         # 上下文摘要最大字符数
+
+  # 按客户端覆盖（未覆盖的客户端使用上述默认值）
+  # Codex prompt 结构更复杂（含 tool 定义、workspace 规则），摘要策略应更激进
+  per_client:
+    codex:
+      summary_max_chars: 200     # 更短摘要，Codex system prompt 自带上下文
+      system_extract_chars: 2000 # 从 system prompt 提取时取更少字符
+    hermes:
+      summary_max_chars: 350     # Hermes system prompt 长但结构化，摘要可稍长
+    openclaw:
+      summary_max_chars: 350     # 多Agent场景，保留更多上下文
+      system_extract_chars: 3000
+    workbuddy:
+      summary_max_chars: 300     # 与默认一致
+      compact_threshold_bytes: 8000  # WorkBuddy 请求体通常更大，阈值提高
+
+# ── 脱敏 ──
+sanitizer:
+  # 模式：auto（静默脱敏）/ off（关闭）/ detect（仅检测记录，不替换）
+  # 运行时可通过 HTTP Header 覆盖：X-Sanitize-Mode: auto|off|detect
+  # detect 模式下 X-Sanitize-Confirm: true → 临时升级为 auto
+  mode: "auto"
+
+  # 规则文件路径（相对于本 config.yaml）
+  rules_file: "sanitizer_rules.yaml"
+
+  # 安全端口模式（可选）：开第二个端口，强制脱敏
+  # 设为非空时，proxy 同时监听此端口，该端口进来的请求自动 mode=auto
+  port_safe: ""  # 例: "4002"
+
+  # 检测到敏感信息时的行为
+  # "log" = 仅日志记录
+  # "warn" = 日志 + 终端醒目警告
+  on_detect: "log"
+
+# ── 文件内容检测 ──
+file_detect:
+  enabled: true
+  # 检测到无法脱敏的附件（图片/PDF/Word）时的行为：
+  # "log"   = 仅日志记录
+  # "warn"  = 日志 + 终端警告
+  # "block" = 拒绝请求，返回 HTTP 409（仅安全端口/auto 模式生效）
+  on_attachment: "warn"
+  # 可识别并分类的 MIME 类型（无需配置，自动检测 data: URL）
+  # 图片类: image/png, image/jpeg, image/webp, image/gif, image/bmp, image/tiff
+  # 文档类: application/pdf, application/msword, application/vnd.openxmlformats...
+  # 文本类: text/plain, text/markdown, application/json (可脱敏)
+
+# ── 响应后处理 ──
+response_fix:
+  enabled: true
+  # tool_calls 格式修复 — mini 模型常见格式错误
+  tool_calls:
+    # 修复空 function.arguments → "{}"
+    fix_empty_arguments: true
+    # 修复缺失 function.name → 尝试从 arguments 推断
+    fix_missing_name: true
+    # 修复 arguments 不是合法 JSON → 尝试包装
+    fix_invalid_json: true
+    # 修复 tool_calls 在 message 中但缺失 role → 补 "assistant"
+    fix_missing_role: true
+
+# ── 动态运行时控制 ──
+# 允许通过聊天消息或 API 端点动态切换脱敏模式，无需重启 proxy 或修改配置
+dynamic_control:
+  enabled: true                # 总开关
+
+  # 魔法命令：在任意客户端聊天中发送指令即可控制脱敏
+  # 支持格式（中英文）：
+  #   /sanitize on      → 开启自动脱敏
+  #   /sanitize off     → 关闭脱敏
+  #   /sanitize detect  → 仅检测不替换
+  #   /sanitize status  → 查看当前状态
+  #   开启脱敏 / 关闭脱敏 / 脱敏模式 检测 / 脱敏状态
+  magic_command: true
+
+  # Admin API：允许通过 HTTP 端点程序化控制
+  # GET  /admin/sanitize  → 查看当前运行时状态
+  # POST /admin/sanitize  → 更新运行时设置 {"mode":"auto","file_block":true}
+  admin_api: true
+
+  # Admin API 密钥 — 为空则无认证（本地使用安全）
+  admin_key: ""
+
+  # 指令执行后是否在聊天中返回确认消息
+  response_inject: true
+
+# ── Token 用量统计 ──
+stats:
+  enabled: true
+  # 告警阈值（单次请求 token 数超过此值打 warn）
+  warn_total_tokens: 8000
+  warn_prompt_tokens: 6000
+  # 统计维度
+  track_by_client: true
+  track_by_model: true
+  track_by_session: true   # 按 User-Agent + IP 对识别会话
